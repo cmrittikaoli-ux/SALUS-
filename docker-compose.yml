@@ -1,0 +1,40 @@
+# One-command setup:  docker compose up --build
+# API docs at http://localhost:8000/docs  ·  Postgres at localhost:5432 (postgres / postgres, db "salus")
+services:
+  db:
+    build: ./db
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: salus
+      TZ: Asia/Kolkata
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_cron
+      -c cron.database_name=salus
+      -c cron.use_background_workers=on
+      -c max_worker_processes=20
+      -c cron.timezone=Asia/Kolkata
+    ports: ["5432:5432"]
+    volumes:
+      - ./db/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./db/02_functions.sql:/docker-entrypoint-initdb.d/02_functions.sql:ro
+      - ./db/03_cron.sql:/docker-entrypoint-initdb.d/03_cron.sql:ro
+      - ./db/06_accounts_diary_profiles.sql:/docker-entrypoint-initdb.d/06_accounts_diary_profiles.sql:ro
+      - salus_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d salus"]
+      interval: 3s
+      retries: 20
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/salus
+    depends_on:
+      db: { condition: service_healthy }
+    ports: ["8000:8000"]
+    # seeds on first start only (dates are relative to the day you run it)
+    command: sh -c "python scripts/seed.py --if-empty && cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+volumes:
+  salus_pgdata:
